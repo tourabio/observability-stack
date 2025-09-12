@@ -86,9 +86,9 @@ class LogIngestionService:
                 "version": "1.0.0"
             }
             
-            # Check message size (limit to ~10MB to be safe)
+            # Check message size (limit to ~500KB to be safe)
             message_size = len(json.dumps(message, default=str).encode('utf-8'))
-            if message_size > 10000000:  # 10MB limit
+            if message_size > 500000:  # 500KB limit
                 logger.error(
                     "Message too large for Kafka",
                     message_size=message_size,

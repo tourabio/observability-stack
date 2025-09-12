@@ -18,7 +18,7 @@ class KafkaClient:
             'batch.size': 16384,
             'linger.ms': 10,
             'buffer.memory': 33554432,
-            'message.max.bytes': 200000000,
+            'message.max.bytes': 1000000,
         }
         
         self.consumer_config = {
@@ -26,7 +26,7 @@ class KafkaClient:
             'auto.offset.reset': 'earliest',
             'enable.auto.commit': True,
             'group.id': 'observability-consumer',
-            'fetch.message.max.bytes': 200000000,
+            'fetch.message.max.bytes': 1048576,
         }
         
         self.admin_config = {
