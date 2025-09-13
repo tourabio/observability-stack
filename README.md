@@ -13,27 +13,115 @@ This project implements a complete data processing pipeline that takes raw API e
 - **Production-grade monitoring** with metrics, dashboards, and alerting
 - **Scalable architecture** supporting horizontal scaling and high throughput
 
-## Architecture
+## 🏗️ **Architecture Overview**
 
-The stack consists of 3 Python microservices:
+The observability stack follows an event-driven microservices architecture with clear separation of concerns and scalable message processing:
 
-1. **Log Ingestion Service** (Port 8001)
-   - Ingests raw log entries from files or API endpoints
-   - Validates and publishes to Kafka `raw-logs` topic
-   - Provides REST API for single log ingestion and batch file processing
+```
+logs.json → Ingestion Service → Kafka(raw-logs) 
+            ↓
+Standardization Service → Kafka(standardized-logs)
+            ↓  
+Processing Service → Kafka(processed-metrics) → Analytics APIs
+            ↓
+Grafana Dashboards ← Prometheus ← All Services
+```
 
-2. **Log Standardization Service** (Port 8002) 
-   - Consumes raw logs from Kafka
-   - Normalizes and standardizes log format
-   - Publishes to `standardized-logs` topic
-   - Handles timestamp parsing, data type normalization, error extraction
+## 🔬 **Microservices Deep Dive**
 
-3. **Log Processing Service** (Port 8003)
-   - Consumes standardized logs from Kafka
-   - Generates analytics and metrics (efficiency scores, throughput, resource utilization)
-   - Detects anomalies and sends alerts
-   - Publishes processed metrics to `processed-metrics` topic
-   - Provides analytics REST APIs
+### **1. Log Ingestion Service** (`services/log-ingestion/`) - Port 8001
+
+**Purpose**: Entry point for raw log data into the observability stack.
+
+**Core Responsibilities:**
+- **File Processing**: Reads and parses the `logs.json` file containing API execution logs
+- **Data Validation**: Uses Pydantic models to validate incoming log entries against expected schema
+- **Message Chunking**: Implements intelligent chunking for large payloads (handles up to 1.1GB files)
+- **Kafka Publishing**: Publishes validated logs to the `raw-logs` Kafka topic
+- **API Endpoints**: Provides REST endpoints for single log ingestion and batch file processing
+
+**Key Features:**
+- **Automatic File Detection**: Scans for logs.json in the project root
+- **Error Handling**: Graceful handling of malformed log entries with detailed error reporting
+- **Health Monitoring**: Exposes `/health` endpoint with dependency status
+- **Metrics Export**: Prometheus metrics for ingestion rates, success/failure counts
+- **Background Processing**: Asynchronous processing to handle large files without blocking
+
+**Technology Stack**: FastAPI, Pydantic, Confluent Kafka, Prometheus Client
+
+**API Endpoints:**
+- `GET /ingest/trigger` - Process the default logs.json file
+- `POST /ingest/single` - Ingest a single log entry
+- `POST /ingest/file` - Ingest logs from a custom file path
+- `GET /health` - Health check with Kafka connection status
+- `GET /metrics` - Prometheus metrics endpoint
+
+### **2. Log Standardization Service** (`services/log-standardization/`) - Port 8002
+
+**Purpose**: Normalizes and standardizes raw log data into a consistent format for downstream processing.
+
+**Core Responsibilities:**
+- **Data Transformation**: Converts raw log entries into standardized format with consistent field types
+- **Timestamp Parsing**: Handles various timestamp formats and converts to ISO 8601
+- **Data Type Normalization**: Ensures numeric fields (CPU time, memory) are properly typed
+- **Error Categorization**: Extracts and categorizes error messages from failed operations  
+- **Message Reconstruction**: Handles chunked messages from the ingestion service
+- **Schema Validation**: Ensures output conforms to standardized log schema
+
+**Key Features:**
+- **Format Flexibility**: Handles multiple input timestamp formats (DD-MM-YYYY HH:MM:SS.microseconds)
+- **Error Extraction**: Identifies and extracts meaningful error messages from failed operations
+- **Resource Normalization**: Converts memory usage and CPU time to standard units
+- **Chunk Processing**: Reassembles chunked messages for large log batches
+- **Consumer Group Management**: Uses Kafka consumer groups for scalable processing
+
+**Data Transformations:**
+- **Raw Format**: `{"No_Sequence": "2025-09-05-16-45", "Debut": "05-09-2025 16:45:26.191702", ...}`
+- **Standardized Format**: `{"sequence_id": "2025-09-05-16-45", "start_time": "2025-09-05T16:45:26.191702Z", ...}`
+
+**Technology Stack**: FastAPI, Pydantic, Kafka Consumer/Producer, Asyncio
+
+### **3. Log Processing Service** (`services/log-processor/`) - Port 8003
+
+**Purpose**: Advanced analytics engine that generates insights, detects anomalies, and produces business metrics.
+
+**Core Responsibilities:**
+- **Efficiency Scoring**: Calculates performance efficiency based on duration, CPU usage, and memory consumption
+- **Anomaly Detection**: Identifies failed operations, unusually long durations, and high resource usage
+- **Statistical Analysis**: Generates per-source statistics (success rates, average durations, resource usage)
+- **Real-time Analytics**: Maintains in-memory analytics for instant API responses
+- **Alerting**: Identifies and flags anomalous behavior for monitoring systems
+
+**Key Features:**
+- **Smart Efficiency Algorithm**: 
+  ```python
+  base_score = max(0, 100 - (duration_minutes * 10))
+  cpu_penalty = min(cpu_time_seconds * 5, 30)
+  memory_bonus = min(memory_mb / 10, 10)
+  efficiency_score = max(0, base_score - cpu_penalty + memory_bonus)
+  ```
+- **Multi-criteria Anomaly Detection**:
+  - Failed operations (status != SUCCESS)
+  - Duration > 300 seconds (5 minutes)
+  - Memory usage > 100MB
+  - Efficiency score < 50
+- **Source-based Analytics**: Tracks performance metrics per business system (SharePoint, Zoho, etc.)
+- **RESTful Analytics API**: Provides endpoints for dashboard integration and monitoring
+
+**Analytics Capabilities:**
+- **Performance Metrics**: Duration analysis, resource utilization trends
+- **Source Comparison**: Cross-system performance benchmarking
+- **Anomaly Reporting**: Real-time identification of problematic operations
+- **Efficiency Tracking**: Business KPIs for operational excellence
+
+**API Endpoints:**
+- `GET /analytics/summary` - Overall system statistics and performance
+- `GET /analytics/anomalies` - Recently detected anomalous operations
+- `GET /analytics/recent` - Latest processed log entries with analytics
+- `GET /analytics/sources` - Performance breakdown by source system
+- `GET /health` - Service health and Kafka connection status
+
+**Technology Stack**: FastAPI, Statistical Analysis, Kafka Consumer, In-memory Analytics
 
 ## 🛠️ **Technology Stack**
 
