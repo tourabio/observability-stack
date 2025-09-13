@@ -92,6 +92,10 @@ class LogProcessorService:
             )
             
             self.is_healthy = True
+            
+            # Set Kafka connection metrics
+            metrics.set_active_connections("kafka", 1)
+            
             logger.info("Log Processor Service started successfully")
             
             # Start consuming messages
@@ -101,6 +105,9 @@ class LogProcessorService:
         except Exception as e:
             logger.error(f"Failed to start service: {e}")
             self.is_healthy = False
+            
+            # Set Kafka connection metric to 0 if failed
+            metrics.set_active_connections("kafka", 0)
 
     async def stop(self):
         """Cleanup service resources"""

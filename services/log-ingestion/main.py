@@ -90,12 +90,19 @@ class LogIngestionService:
                         logger.error("All producer creation attempts failed")
                         raise
             self.is_healthy = True
+            
+            # Set Kafka connection metric
+            metrics.set_active_connections("kafka", 1)
+            
             logger.info("Log Ingestion Service started successfully")
             
         except Exception as e:
             logger.error(f"Failed to start service: {e}")
             self.is_healthy = False
             self.producer = None
+            
+            # Set Kafka connection metric to 0 if failed
+            metrics.set_active_connections("kafka", 0)
 
     async def stop(self):
         """Cleanup service resources"""

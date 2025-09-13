@@ -254,20 +254,10 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, rate(message_processing_duration_seconds_bucket[5m]))",
+          "expr": "rate(message_processing_duration_seconds_sum[5m]) / rate(message_processing_duration_seconds_count[5m])",
           "interval": "",
-          "legendFormat": "95th percentile - {{service}}",
+          "legendFormat": "avg duration - {{service}}",
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "histogram_quantile(0.50, rate(message_processing_duration_seconds_bucket[5m]))",
-          "interval": "",
-          "legendFormat": "50th percentile - {{service}}",
-          "refId": "B"
         }
       ],
       "title": "Message Processing Duration",
@@ -557,76 +547,6 @@
       ],
       "title": "Active Kafka Connections",
       "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Request duration percentiles",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.5
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 18,
-        "y": 16
-      },
-      "id": 8,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "9.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "histogram_quantile(0.95, rate(request_duration_seconds_bucket[5m]))",
-          "interval": "",
-          "legendFormat": "95th percentile",
-          "refId": "A"
-        }
-      ],
-      "title": "Request Duration (95th percentile)",
-      "type": "stat"
     }
   ],
   "refresh": "5s",
@@ -644,6 +564,6 @@
   "timezone": "",
   "title": "Observability Stack Dashboard",
   "uid": "observability-stack",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

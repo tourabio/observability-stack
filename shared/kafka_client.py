@@ -20,7 +20,7 @@ class KafkaClient:
             'retries': 3,
             'batch.size': 16384,
             'linger.ms': 10,
-            'message.max.bytes': 1000000,
+            'message.max.bytes': 10485760,
         }
         
         self.consumer_config = {
@@ -128,7 +128,7 @@ class KafkaClient:
             logger.error(f"Error consuming message: {e}")
             return None
 
-    def chunk_data(self, data: dict, max_chunk_size: int = 50000) -> List[Dict]:
+    def chunk_data(self, data: dict, max_chunk_size: int = 8000000) -> List[Dict]:
         """Split large data into smaller chunks"""
         try:
             # Serialize the full data to check size
@@ -168,20 +168,30 @@ class KafkaClient:
                     }
                     chunks.append(chunk)
             
-            # For single log entries, split by fields if too large
+            # For single log entries, split the serialized data itself
             else:
-                # Simple approach: create multiple chunks with partial data
-                chunk_data = data.copy()
+                # Calculate number of chunks needed
+                total_chunks = math.ceil(full_size / max_chunk_size)
                 
-                chunk = {
-                    'chunk_id': chunk_id,
-                    'total_chunks': 1,
-                    'chunk_number': 1,
-                    'data': chunk_data,
-                    'timestamp': datetime.now().isoformat(),
-                    'source': 'kafka-chunking'
-                }
-                chunks.append(chunk)
+                # Split the JSON string into chunks
+                chunk_size = max_chunk_size - 1000  # Leave room for metadata
+                
+                for i in range(total_chunks):
+                    start_idx = i * chunk_size
+                    end_idx = min((i + 1) * chunk_size, len(full_message))
+                    chunk_content = full_message[start_idx:end_idx]
+                    
+                    chunk = {
+                        'chunk_id': chunk_id,
+                        'total_chunks': total_chunks,
+                        'chunk_number': i + 1,
+                        'content': chunk_content,
+                        'start_index': start_idx,
+                        'end_index': end_idx,
+                        'timestamp': datetime.now().isoformat(),
+                        'source': 'kafka-chunking'
+                    }
+                    chunks.append(chunk)
             
             logger.info(f"Split message into {len(chunks)} chunks", 
                        original_size=full_size, chunk_id=chunk_id)
@@ -233,7 +243,21 @@ class KafkaClient:
                 logger.warning(f"Missing chunks: expected {total_chunks}, got {len(sorted_chunks)}")
                 return None
             
-            # Reconstruct the original data
+            # Check if this is content-based chunking (split JSON strings)
+            if 'content' in first_chunk:
+                # Reconstruct JSON string from content chunks
+                full_content = ""
+                for chunk in sorted_chunks:
+                    full_content += chunk.get('content', '')
+                
+                try:
+                    # Parse the reconstructed JSON
+                    return json.loads(full_content)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse reconstructed JSON: {e}")
+                    return None
+            
+            # Reconstruct the original data (legacy logic for data-based chunks)
             if total_chunks == 1:
                 return first_chunk.get('data')
             
