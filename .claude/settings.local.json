@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker ps:*)"
     ],
     "deny": [],
     "ask": []

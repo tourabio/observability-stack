@@ -1,7 +1,9 @@
 import asyncio
 import json
+import math
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -20,7 +22,7 @@ from shared.metrics import ServiceMetrics, RequestTimer
 
 # Configuration
 SERVICE_NAME = "log-ingestion"
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 PORT = int(os.getenv("PORT", "8001"))
 
@@ -57,17 +59,43 @@ class LogIngestionService:
         """Initialize the service"""
         try:
             # Create Kafka topics
+            logger.info("Creating Kafka topics...")
             kafka_client.create_topics(KAFKA_TOPICS)
+            logger.info("Kafka topics created successfully")
             
-            # Create Kafka producer
-            self.producer = kafka_client.create_producer()
+            # Create Kafka producer with retries
+            logger.info("Creating Kafka producer...")
+            max_retries = 5
+            retry_delay = 2
             
+            for attempt in range(max_retries):
+                try:
+                    self.producer = kafka_client.create_producer()
+                    
+                    if self.producer is None:
+                        raise Exception("Kafka producer is None after creation")
+                    
+                    # Test the producer by getting metadata
+                    metadata = self.producer.list_topics(timeout=5)
+                    logger.info("Kafka producer created and connected successfully")
+                    break
+                    
+                except Exception as e:
+                    logger.warning(f"Producer creation attempt {attempt + 1}/{max_retries} failed: {e}")
+                    if attempt < max_retries - 1:
+                        logger.info(f"Retrying in {retry_delay} seconds...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                    else:
+                        logger.error("All producer creation attempts failed")
+                        raise
             self.is_healthy = True
             logger.info("Log Ingestion Service started successfully")
             
         except Exception as e:
             logger.error(f"Failed to start service: {e}")
             self.is_healthy = False
+            self.producer = None
 
     async def stop(self):
         """Cleanup service resources"""
@@ -78,6 +106,9 @@ class LogIngestionService:
     async def ingest_log_entry(self, log_entry: RawLogEntry) -> bool:
         """Ingest a single log entry"""
         try:
+            if self.producer is None:
+                logger.error("Cannot ingest log entry: Kafka producer not initialized")
+                return False
             # Create Kafka message
             message = {
                 "timestamp": datetime.now().isoformat(),
@@ -86,24 +117,12 @@ class LogIngestionService:
                 "version": "1.0.0"
             }
             
-            # Check message size (limit to ~500KB to be safe)
-            message_size = len(json.dumps(message, default=str).encode('utf-8'))
-            if message_size > 500000:  # 500KB limit
-                logger.error(
-                    "Message too large for Kafka",
-                    message_size=message_size,
-                    sequence=log_entry.No_Sequence,
-                    object_id=log_entry.Objet_Id
-                )
-                metrics.record_error("message_too_large")
-                return False
-            
-            # Produce to Kafka
-            kafka_client.produce_message(
+            # Use chunked messaging to handle any size
+            kafka_client.produce_chunked_message(
                 producer=self.producer,
                 topic="raw-logs",
                 key=f"{log_entry.Entreprise}:{log_entry.No_Sequence}:{log_entry.Objet_Id}",
-                value=message
+                data=message
             )
             
             # Record metrics
@@ -125,10 +144,15 @@ class LogIngestionService:
             return False
 
     async def ingest_log_file(self, file_path: str) -> dict:
-        """Ingest logs from a JSON file"""
+        """Ingest logs from a JSON file using chunked processing"""
         results = {"total": 0, "successful": 0, "failed": 0}
         
         try:
+            if self.producer is None:
+                logger.error("Cannot ingest log file: Kafka producer not initialized")
+                raise HTTPException(status_code=500, detail="Kafka producer not available")
+            # Read all log entries first
+            log_entries = []
             with open(file_path, 'r', encoding='utf-8') as file:
                 # Read each line as a separate JSON object
                 for line_num, line in enumerate(file, 1):
@@ -139,18 +163,25 @@ class LogIngestionService:
                     try:
                         log_data = json.loads(line)
                         log_entry = RawLogEntry(**log_data)
-                        
-                        success = await self.ingest_log_entry(log_entry)
+                        log_entries.append(log_entry)
                         results["total"] += 1
-                        
-                        if success:
-                            results["successful"] += 1
-                        else:
-                            results["failed"] += 1
                             
                     except Exception as e:
                         logger.error(f"Failed to parse line {line_num}: {e}")
                         results["failed"] += 1
+            
+            # Process logs individually to avoid chunking complexity
+            for entry in log_entries:
+                try:
+                    success = await self.ingest_log_entry(entry)
+                    if success:
+                        results["successful"] += 1
+                    else:
+                        results["failed"] += 1
+                        
+                except Exception as e:
+                    logger.error(f"Failed to process log entry {entry.No_Sequence}: {e}")
+                    results["failed"] += 1
                         
         except FileNotFoundError:
             raise HTTPException(status_code=404, detail="Log file not found")

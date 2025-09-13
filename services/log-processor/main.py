@@ -14,14 +14,14 @@ import uvicorn
 # Add shared modules to path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from shared.models import StandardizedLogEntry, ProcessedMetrics, LogStatus, HealthCheck
+from shared.models import StandardizedLogEntry, ProcessedMetrics, LogStatus, HealthCheck, ChunkedMessage
 from shared.kafka_client import KafkaClient
 from shared.logger import configure_logging, get_logger
 from shared.metrics import ServiceMetrics, RequestTimer, MessageTimer
 
 # Configuration
 SERVICE_NAME = "log-processor"
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 PORT = int(os.getenv("PORT", "8003"))
 CONSUMER_GROUP = "processor-consumer-group"
@@ -64,6 +64,7 @@ class LogProcessorService:
         self.consumer = None
         self.is_running = False
         self.is_healthy = False
+        self.chunk_buffer = {}  # Buffer for collecting chunks
         
         # In-memory storage for analytics (in production, use a database)
         self.processed_logs: List[ProcessedMetrics] = []
@@ -243,12 +244,12 @@ class LogProcessorService:
                 }
             }
             
-            # Send to alerts topic
-            kafka_client.produce_message(
+            # Send to alerts topic using chunked messaging
+            kafka_client.produce_chunked_message(
                 producer=self.producer,
                 topic="alerts",
                 key=f"alert:{processed.sequence_id}",
-                value=alert
+                data=alert
             )
             
             logger.warning(
@@ -264,8 +265,16 @@ class LogProcessorService:
     async def process_standardized_log(self, standardized_log_data: dict) -> bool:
         """Process a standardized log message"""
         try:
+            # Handle different message structures
+            if "data" in standardized_log_data and isinstance(standardized_log_data["data"], dict):
+                # Standard message format
+                log_data = standardized_log_data["data"]
+            else:
+                # Direct log data (for reconstructed messages)
+                log_data = standardized_log_data
+            
             # Parse standardized log entry
-            standardized_entry = StandardizedLogEntry(**standardized_log_data["data"])
+            standardized_entry = StandardizedLogEntry(**log_data)
             
             # Process the entry
             processed = self.process_log_entry(standardized_entry)
@@ -293,12 +302,12 @@ class LogProcessorService:
                 "original_source": standardized_log_data.get("source", "unknown")
             }
             
-            # Produce to Kafka
-            kafka_client.produce_message(
+            # Produce to Kafka using chunked messaging
+            kafka_client.produce_chunked_message(
                 producer=self.producer,
                 topic="processed-metrics",
                 key=f"{processed.company}:{processed.sequence_id}:{processed.source}",
-                value=message
+                data=message
             )
             
             # Record metrics
@@ -319,6 +328,66 @@ class LogProcessorService:
             metrics.record_error("processing_failure")
             return False
 
+    def is_chunked_message(self, message_data: dict) -> bool:
+        """Check if the message is a chunked message"""
+        return 'chunk_id' in message_data and 'total_chunks' in message_data and 'chunk_number' in message_data
+
+    def collect_chunks(self, chunk_data: dict) -> Optional[dict]:
+        """Collect chunks and return reconstructed message when complete"""
+        try:
+            chunk_id = chunk_data['chunk_id']
+            chunk_number = chunk_data['chunk_number']
+            total_chunks = chunk_data['total_chunks']
+            
+            # Initialize chunk collection for this chunk_id
+            if chunk_id not in self.chunk_buffer:
+                self.chunk_buffer[chunk_id] = {
+                    'total_chunks': total_chunks,
+                    'received_chunks': {},
+                    'timestamp': datetime.now()
+                }
+            
+            # Store this chunk
+            self.chunk_buffer[chunk_id]['received_chunks'][chunk_number] = chunk_data
+            
+            # Check if we have all chunks
+            received_count = len(self.chunk_buffer[chunk_id]['received_chunks'])
+            if received_count == total_chunks:
+                # Reconstruct the message
+                chunks = list(self.chunk_buffer[chunk_id]['received_chunks'].values())
+                reconstructed = kafka_client.reconstruct_chunked_message(chunks)
+                
+                # Clean up buffer
+                del self.chunk_buffer[chunk_id]
+                
+                logger.info(f"Reconstructed message from {total_chunks} chunks", chunk_id=chunk_id)
+                return reconstructed
+            else:
+                logger.debug(f"Collected chunk {chunk_number}/{total_chunks} for {chunk_id}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error collecting chunks: {e}")
+            return None
+
+    def cleanup_expired_chunks(self, max_age_minutes: int = 5):
+        """Clean up chunks that are too old"""
+        try:
+            current_time = datetime.now()
+            expired_chunks = []
+            
+            for chunk_id, chunk_info in self.chunk_buffer.items():
+                age = (current_time - chunk_info['timestamp']).total_seconds() / 60
+                if age > max_age_minutes:
+                    expired_chunks.append(chunk_id)
+            
+            for chunk_id in expired_chunks:
+                logger.warning(f"Removing expired chunk collection: {chunk_id}")
+                del self.chunk_buffer[chunk_id]
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up expired chunks: {e}")
+
     async def consume_messages(self):
         """Consume messages from Kafka"""
         logger.info("Started consuming messages from standardized-logs topic")
@@ -330,9 +399,35 @@ class LogProcessorService:
                     
                     if message is None:
                         await asyncio.sleep(0.1)
+                        # Periodically clean up expired chunks
+                        if hasattr(self, '_last_cleanup'):
+                            if (datetime.now() - self._last_cleanup).total_seconds() > 300:  # Every 5 minutes
+                                self.cleanup_expired_chunks()
+                                self._last_cleanup = datetime.now()
+                        else:
+                            self._last_cleanup = datetime.now()
                         continue
                     
-                    success = await self.process_standardized_log(message["value"])
+                    message_data = message["value"]
+                    success = False
+                    
+                    # Check if this is a chunked message
+                    if self.is_chunked_message(message_data):
+                        logger.debug(f"Received chunk {message_data.get('chunk_number')}/{message_data.get('total_chunks')}")
+                        
+                        # Collect chunks and try to reconstruct
+                        reconstructed = self.collect_chunks(message_data)
+                        
+                        if reconstructed:
+                            # Process the reconstructed message
+                            success = await self.process_standardized_log(reconstructed)
+                        else:
+                            # Still waiting for more chunks
+                            success = True  # Not an error, just incomplete
+                            
+                    else:
+                        # Regular (non-chunked) message
+                        success = await self.process_standardized_log(message_data)
                     
                     if success:
                         logger.debug(f"Processed message from {message['topic']}")

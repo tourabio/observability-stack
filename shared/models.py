@@ -72,6 +72,17 @@ class KafkaMessage(BaseModel):
     timestamp: datetime
     partition: Optional[int] = None
 
+class ChunkedMessage(BaseModel):
+    """Chunked message for handling large payloads"""
+    chunk_id: str
+    total_chunks: int
+    chunk_number: int
+    data: dict
+    original_key: str
+    timestamp: datetime
+    source: str
+    version: str = "1.0.0"
+
 class HealthCheck(BaseModel):
     """Health check response"""
     service: str
