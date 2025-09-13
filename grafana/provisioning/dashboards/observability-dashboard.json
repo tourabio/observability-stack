@@ -149,7 +149,7 @@
         "reduceOptions": {
           "values": false,
           "calcs": [
-            "lastNotNull"
+            "last"
           ],
           "fields": ""
         },
@@ -164,14 +164,15 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "log_entries_by_source_total",
+          "expr": "sum by (source, status) (log_entries_by_source_total)",
+          "instant": true,
           "interval": "",
           "legendFormat": "{{source}} - {{status}}",
           "refId": "A"
         }
       ],
       "title": "Log Entries by Source",
-      "type": "piechart"
+      "type": "barchart"
     },
     {
       "datasource": {
@@ -564,6 +565,6 @@
   "timezone": "",
   "title": "Observability Stack Dashboard",
   "uid": "observability-stack",
-  "version": 2,
+  "version": 5,
   "weekStart": ""
 }
