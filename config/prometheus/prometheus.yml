@@ -1,0 +1,49 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'observability-stack'
+    environment: 'development'
+
+# Règles d'alerte
+rule_files:
+  - "alerts/*.yml"
+
+# Configuration des cibles de scraping
+scrape_configs:
+  # Prometheus lui-même
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Consumer ingestion - métriques pour le dashboard Grafana
+  - job_name: 'ingestion-consumer'
+    static_configs:
+      - targets: ['consumer:8000']
+    scrape_interval: 5s
+    metrics_path: /metrics
+    honor_labels: true
+
+  # Kafka metrics (si JMX activé)
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka:9997']
+    scrape_interval: 30s
+
+  # Node exporter pour les métriques système (optionnel)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 30s
+
+# Configuration pour Grafana Alerting
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Configuration de stockage
+storage:
+  tsdb:
+    retention.time: 15d
+    retention.size: 10GB
