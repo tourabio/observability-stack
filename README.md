@@ -1,618 +1,397 @@
-# Observability Stack
+# Observability Stack - Microservice d'Ingestion
 
-A production-ready microservices-based observability stack for processing and monitoring API execution logs. This system ingests raw logs, standardizes them, processes them for analytics, and provides comprehensive monitoring and visualization capabilities.
+Une solution complète de monitoring et d'observabilité pour microservices d'ingestion de données, conforme aux spécifications de l'exercice Grafana Pipeline avec Kafka, Prometheus, Loki et Grafana.
 
-## 🎯 **Project Overview**
+## 🎯 **Vue d'ensemble du Projet**
 
-This project implements a complete data processing pipeline that takes raw API execution logs (like those from Zoho, PowerBI, Efficy, SharePoint, EasyProjects) and transforms them into actionable insights. The system demonstrates modern microservices architecture, event-driven processing, and comprehensive observability practices.
+Ce projet implémente une solution complète d'observabilité pour microservices d'ingestion, conforme aux spécifications du document `exercice_grafana_pipeline.md`. Il traite les logs d'exécution d'APIs (Zoho, PowerBI, Efficy, SharePoint, EasyProjects) et les transforme en métriques et visualisations pour Grafana.
 
-### **Key Capabilities**
-- **Real-time log processing** with sub-second latency
-- **Automatic anomaly detection** for failed operations and performance issues
-- **Comprehensive analytics** including efficiency scores and resource utilization
-- **Production-grade monitoring** with metrics, dashboards, and alerting
-- **Scalable architecture** supporting horizontal scaling and high throughput
+### **Caractéristiques Clés**
+- **Producer Python** qui lit logs.json et publie sur topic `ingestion-logs`
+- **Consumer Python** qui traite les événements Kafka et génère des métriques
+- **Dashboard Grafana** suivant les spécifications _MConverter avec terminologie française
+- **6 règles d'alertes** (échec, taux d'échec, source muette, latence dégradée, etc.)
+- **Architecture Docker** prête pour production
 
-## 🏗️ **Architecture Overview**
+## 🏗️ **Architecture**
 
-The observability stack follows an event-driven microservices architecture with clear separation of concerns and scalable message processing:
+```mermaid
+graph TB
+    subgraph "Données"
+        JSON[logs.json]
+    end
 
+    subgraph "Traitement Kafka"
+        PROD[Producer Python]
+        KAFKA[Apache Kafka]
+        CONS[Consumer Python]
+    end
+
+    subgraph "Observabilité"
+        PROM[Prometheus]
+        LOKI[Loki]
+        GRAF[Grafana]
+    end
+
+    subgraph "Management"
+        KUI[Kafka UI]
+        PROMTAIL[Promtail]
+    end
+
+    JSON --> PROD
+    PROD --> KAFKA
+    KAFKA --> CONS
+    CONS --> PROM
+    CONS --> LOKI
+    PROMTAIL --> LOKI
+    PROM --> GRAF
+    LOKI --> GRAF
+    KAFKA --> KUI
 ```
-logs.json → Ingestion Service → Kafka(raw-logs) 
-            ↓
-Standardization Service → Kafka(standardized-logs)
-            ↓  
-Processing Service → Kafka(processed-metrics) → Analytics APIs
-            ↓
-Grafana Dashboards ← Prometheus ← All Services
-```
 
-## 🔬 **Microservices Deep Dive**
+### Composants
 
-### **1. Log Ingestion Service** (`services/log-ingestion/`) - Port 8001
+| Service | Port | Description |
+|---------|------|-------------|
+| **Producer** | - | Script producer.py qui lit logs.json et publie sur topic ingestion-logs |
+| **Consumer** | 8000 | Traitement: consomme Kafka, parse JSON, définit labels, pousse vers Loki |
+| **Kafka** | 9092 | Message broker pour le streaming des logs |
+| **Zookeeper** | 2181 | Coordination pour Kafka |
+| **Prometheus** | 9090 | Collecte et stockage des métriques |
+| **Loki** | 3100 | Collecte et stockage des logs pour Grafana |
+| **Grafana** | 3000 | Tableau de bord selon spécifications _MConverter |
+| **Kafka UI** | 8080 | Interface de gestion Kafka |
 
-**Purpose**: Entry point for raw log data into the observability stack.
+## 🚀 Démarrage Rapide
 
-**Core Responsibilities:**
-- **File Processing**: Reads and parses the `logs.json` file containing API execution logs
-- **Data Validation**: Uses Pydantic models to validate incoming log entries against expected schema
-- **Message Chunking**: Implements intelligent chunking for large payloads (handles up to 1.1GB files)
-- **Kafka Publishing**: Publishes validated logs to the `raw-logs` Kafka topic
-- **API Endpoints**: Provides REST endpoints for single log ingestion and batch file processing
+### Prérequis
+- Docker et Docker Compose
+- 8GB RAM minimum
+- Ports 3000, 3100, 8080, 9090, 9092 disponibles
 
-**Key Features:**
-- **Automatic File Detection**: Scans for logs.json in the project root
-- **Error Handling**: Graceful handling of malformed log entries with detailed error reporting
-- **Health Monitoring**: Exposes `/health` endpoint with dependency status
-- **Metrics Export**: Prometheus metrics for ingestion rates, success/failure counts
-- **Background Processing**: Asynchronous processing to handle large files without blocking
+### Installation
 
-**Technology Stack**: FastAPI, Pydantic, Confluent Kafka, Prometheus Client
-
-**API Endpoints:**
-- `GET /ingest/trigger` - Process the default logs.json file
-- `POST /ingest/single` - Ingest a single log entry
-- `POST /ingest/file` - Ingest logs from a custom file path
-- `GET /health` - Health check with Kafka connection status
-- `GET /metrics` - Prometheus metrics endpoint
-
-### **2. Log Standardization Service** (`services/log-standardization/`) - Port 8002
-
-**Purpose**: Normalizes and standardizes raw log data into a consistent format for downstream processing.
-
-**Core Responsibilities:**
-- **Data Transformation**: Converts raw log entries into standardized format with consistent field types
-- **Timestamp Parsing**: Handles various timestamp formats and converts to ISO 8601
-- **Data Type Normalization**: Ensures numeric fields (CPU time, memory) are properly typed
-- **Error Categorization**: Extracts and categorizes error messages from failed operations  
-- **Message Reconstruction**: Handles chunked messages from the ingestion service
-- **Schema Validation**: Ensures output conforms to standardized log schema
-
-**Key Features:**
-- **Format Flexibility**: Handles multiple input timestamp formats (DD-MM-YYYY HH:MM:SS.microseconds)
-- **Error Extraction**: Identifies and extracts meaningful error messages from failed operations
-- **Resource Normalization**: Converts memory usage and CPU time to standard units
-- **Chunk Processing**: Reassembles chunked messages for large log batches
-- **Consumer Group Management**: Uses Kafka consumer groups for scalable processing
-
-**Data Transformations:**
-- **Raw Format**: `{"No_Sequence": "2025-09-05-16-45", "Debut": "05-09-2025 16:45:26.191702", ...}`
-- **Standardized Format**: `{"sequence_id": "2025-09-05-16-45", "start_time": "2025-09-05T16:45:26.191702Z", ...}`
-
-**Technology Stack**: FastAPI, Pydantic, Kafka Consumer/Producer, Asyncio
-
-### **3. Log Processing Service** (`services/log-processor/`) - Port 8003
-
-**Purpose**: Advanced analytics engine that generates insights, detects anomalies, and produces business metrics.
-
-**Core Responsibilities:**
-- **Efficiency Scoring**: Calculates performance efficiency based on duration, CPU usage, and memory consumption
-- **Anomaly Detection**: Identifies failed operations, unusually long durations, and high resource usage
-- **Statistical Analysis**: Generates per-source statistics (success rates, average durations, resource usage)
-- **Real-time Analytics**: Maintains in-memory analytics for instant API responses
-- **Alerting**: Identifies and flags anomalous behavior for monitoring systems
-
-**Key Features:**
-- **Smart Efficiency Algorithm**: 
-  ```python
-  base_score = max(0, 100 - (duration_minutes * 10))
-  cpu_penalty = min(cpu_time_seconds * 5, 30)
-  memory_bonus = min(memory_mb / 10, 10)
-  efficiency_score = max(0, base_score - cpu_penalty + memory_bonus)
-  ```
-- **Multi-criteria Anomaly Detection**:
-  - Failed operations (status != SUCCESS)
-  - Duration > 300 seconds (5 minutes)
-  - Memory usage > 100MB
-  - Efficiency score < 50
-- **Source-based Analytics**: Tracks performance metrics per business system (SharePoint, Zoho, etc.)
-- **RESTful Analytics API**: Provides endpoints for dashboard integration and monitoring
-
-**Analytics Capabilities:**
-- **Performance Metrics**: Duration analysis, resource utilization trends
-- **Source Comparison**: Cross-system performance benchmarking
-- **Anomaly Reporting**: Real-time identification of problematic operations
-- **Efficiency Tracking**: Business KPIs for operational excellence
-
-**API Endpoints:**
-- `GET /analytics/summary` - Overall system statistics and performance
-- `GET /analytics/anomalies` - Recently detected anomalous operations
-- `GET /analytics/recent` - Latest processed log entries with analytics
-- `GET /analytics/sources` - Performance breakdown by source system
-- `GET /health` - Service health and Kafka connection status
-
-**Technology Stack**: FastAPI, Statistical Analysis, Kafka Consumer, In-memory Analytics
-
-## 🛠️ **Technology Stack**
-
-### **Core Microservices (Python)**
-- **FastAPI**: Modern, fast web framework for building APIs
-- **Pydantic**: Data validation and serialization using Python type hints
-- **Structlog**: Structured logging for better observability
-- **Confluent Kafka Python**: High-performance Kafka client
-- **Prometheus Client**: Metrics instrumentation and export
-- **Uvicorn**: ASGI web server for FastAPI applications
-
-### **Infrastructure Components**
-- **Apache Kafka + Zookeeper**: Distributed event streaming platform
-  - Handles high-throughput message processing
-  - Provides durability, fault tolerance, and horizontal scaling
-  - Decouples microservices for better resilience
-
-- **Prometheus**: Systems monitoring and alerting toolkit
-  - Time-series database for metrics storage
-  - Pull-based metrics collection from services
-  - PromQL query language for complex metric analysis
-
-- **Grafana**: Analytics and interactive visualization web application
-  - Pre-configured dashboards for real-time monitoring
-  - Advanced alerting capabilities
-  - Multiple data source support
-
-- **Kafka UI**: Web-based management interface for Kafka
-  - Topic management and monitoring
-  - Consumer group tracking
-  - Message browsing and debugging
-
-### **Container Orchestration**
-- **Docker**: Application containerization
-- **Docker Compose**: Multi-container application orchestration
-- **Health Checks**: Built-in container health monitoring
-- **Volume Persistence**: Data persistence across container restarts
-
-## 🚀 **Quick Start Guide**
-
-### **Prerequisites**
-- **Docker** (version 20.10+) and **Docker Compose** (version 2.0+)
-- **Minimum 4GB RAM** available for containers
-- **Ports available**: 3000, 8001-8003, 8080, 9090, 9092
-- **Optional**: `curl` and `jq` for testing API endpoints
-
-### **Step-by-Step Setup**
-
-1. **Clone and Navigate**
-   ```bash
-   cd observability-stack
-   ```
-
-2. **Start the Complete Stack**
-   ```bash
-   # Option 1: Using Docker Compose
-   docker-compose up -d
-   
-   # Option 2: Using the Makefile
-   make up
-   ```
-
-3. **Wait for Services to Initialize** (approximately 60 seconds)
-   ```bash
-   # Check container status
-   docker-compose ps
-   
-   # Or use the health check command
-   make health
-   ```
-
-4. **Trigger Log Processing**
-   ```bash
-   # Process the included logs.json file
-   curl -X GET "http://localhost:8001/ingest/trigger"
-   
-   # Or use the Makefile command
-   make ingest
-   ```
-
-5. **Access the Dashboards**
-   - **Grafana**: http://localhost:3000 (admin/admin123)
-   - **Kafka UI**: http://localhost:8080
-   - **Prometheus**: http://localhost:9090
-
-### **Verification Steps**
-
+1. **Démarrer la stack complète**
 ```bash
-# Check if all services are healthy
-make health
-
-# View real-time logs
-make logs
-
-# Get analytics summary
-make analytics
-
-# Check for detected anomalies
-make anomalies
+docker-compose up -d
 ```
 
-## Service URLs
-
-| Service | URL | Description |
-|---------|-----|-------------|
-| Log Ingestion | http://localhost:8001 | Ingest logs via API |
-| Log Standardization | http://localhost:8002 | Standardization service status |
-| Log Processing | http://localhost:8003 | Analytics and metrics |
-| Grafana Dashboard | http://localhost:3000 | Visualization (admin/admin123) |
-| Prometheus | http://localhost:9090 | Metrics storage |
-| Kafka UI | http://localhost:8080 | Kafka management |
-
-## API Endpoints
-
-### Log Ingestion Service (8001)
-- `GET /health` - Health check
-- `GET /metrics` - Prometheus metrics
-- `POST /ingest/single` - Ingest single log entry
-- `POST /ingest/file` - Ingest from file
-- `GET /ingest/trigger` - Process default logs.json
-
-### Log Standardization Service (8002)
-- `GET /health` - Health check
-- `GET /metrics` - Prometheus metrics
-- `POST /standardize/single` - Test standardization
-- `GET /status` - Service status
-
-### Log Processing Service (8003)
-- `GET /health` - Health check
-- `GET /metrics` - Prometheus metrics
-- `GET /analytics/sources` - Source analytics
-- `GET /analytics/recent` - Recent processed logs
-- `GET /analytics/anomalies` - Detected anomalies
-- `GET /analytics/summary` - Overall summary
-- `GET /status` - Service status
-
-## 🔄 **System Architecture & Data Flow**
-
-### **High-Level Architecture**
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   logs.json     │───▶│  Log Ingestion   │───▶│     Kafka       │
-│   (Raw Data)    │    │    Service       │    │  (raw-logs)     │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                                │                        │
-                                ▼                        ▼
-                       ┌──────────────────┐    ┌─────────────────┐
-                       │   Prometheus     │    │ Standardization │
-                       │   (Metrics)      │    │    Service      │
-                       └──────────────────┘    └─────────────────┘
-                                │                        │
-                                ▼                        ▼
-                       ┌──────────────────┐    ┌─────────────────┐
-                       │     Grafana      │    │     Kafka       │
-                       │   (Dashboards)   │    │(standardized-   │
-                       └──────────────────┘    │    logs)        │
-                                               └─────────────────┘
-                                                        │
-                                                        ▼
-                                               ┌─────────────────┐
-                                               │  Processing     │
-                                               │    Service      │
-                                               └─────────────────┘
-                                                        │
-                                                        ▼
-                                               ┌─────────────────┐
-                                               │     Kafka       │
-                                               │ (processed-     │
-                                               │   metrics)      │
-                                               └─────────────────┘
+2. **Vérifier le statut des services**
+```bash
+docker-compose ps
 ```
 
-### **Detailed Data Processing Pipeline**
+3. **Exécuter le producer pour traiter logs.json**
+```bash
+# Le producer se lance automatiquement
+# Ou manuellement:
+docker-compose run --rm producer python producer.py
+```
 
-1. **Data Ingestion Phase**
-   - Raw logs.json file contains API execution records
-   - Log Ingestion Service validates and publishes to Kafka `raw-logs` topic
-   - Each log entry gets a unique key based on company, sequence, and object ID
+### Accès aux Interfaces
+- **Grafana**: http://localhost:3000 (admin/admin123)
+- **Prometheus**: http://localhost:9090
+- **Kafka UI**: http://localhost:8080
+- **Loki**: http://localhost:3100
 
-2. **Data Standardization Phase**
-   - Standardization Service consumes from `raw-logs` topic
-   - Normalizes timestamps, data types, and extracts error information
-   - Publishes clean data to `standardized-logs` topic
+## 📊 Dashboard Grafana
 
-3. **Analytics & Processing Phase**
-   - Processing Service consumes standardized logs
-   - Calculates efficiency scores, throughput, resource utilization
-   - Detects anomalies (failures, long durations, high memory usage)
-   - Publishes analytics to `processed-metrics` topic
-   - Sends alerts to `alerts` topic for anomalies
+Le dashboard suit exactement les spécifications du document `_MConverter.eu_dashboard_grafana_ingestion.md` :
 
-4. **Monitoring & Observability**
-   - All services expose Prometheus metrics
-   - Grafana pulls metrics from Prometheus every 15 seconds
-   - Real-time dashboards show system health and log analytics
+### 1) Vue d'ensemble --- Ingestion: Health
+- **Statuts dernière exécution**: Succès (N), Échecs (N), Taux d'échec (%)
+- **p95 durée (s)** et **Max mémoire (MB)**
+- **Timeline des runs** (barre empilée par État)
+- **Top sources par durée** (p95)
 
-## Sample Log Entry
+### 2) Fiabilité --- Errors & SLAs
+- **Taux d'échec** global et par Source
+- **MTTR** (Mean Time To Recovery)
+- **SLO de fraîcheur**: alerte si pas de run > X minutes
 
-The system processes logs with this structure:
+### 3) Performance --- Latency & Throughput
+- **Durées**: p50/p95/p99 de Duree secondes par Source et Objet
+- **Débit**: nb d'exécutions / 5 min par Source
+- **CPU & mémoire**: p95 par Source
+
+### 4) Détails par connecteur --- Sources & Objets
+- **Grille filtrable** avec colonnes: Debut, Fin, Duree secondes, cpu_time, memory_used, Description
+
+### 5) Derniers messages d'erreur
+- **Table des 5 derniers FAILED** avec détails
+
+### 6) Exemple de visuel du dashboard
+- Panel Type Stat: Succès=120, Échecs=3
+- Taux d'échec Stat (%): 2.4 %
+- Durée (p95) Time series: 2.3s
+- Dernières erreurs Table: Source=A, Objet=X, Desc=timeout
+
+## 🚨 Règles d'Alertes
+
+Conformément aux spécifications, les 6 règles d'alerte suivantes sont implémentées :
+
+### 1. Échec détecté (critique)
+- **Condition**: >0 FAILED sur 5 minutes
+- **Seuil**: Immédiat
+- **Sévérité**: Critical
+
+### 2. Taux d'échec élevé
+- **Condition**: >2% pendant 15 minutes
+- **Seuil**: 2%
+- **Sévérité**: Warning
+
+### 3. Source muette
+- **Condition**: pas d'occurrence sur 75 minutes
+- **Seuil**: 75 minutes
+- **Sévérité**: Warning
+
+### 4. Latence p95 dégradée
+- **Condition**: p95 > 2× baseline (60s)
+- **Seuil**: 60 secondes
+- **Sévérité**: Warning
+
+### 5. Surconsommation mémoire/CPU
+- **Mémoire**: >150 MB (p95)
+- **CPU**: >60s (p95)
+- **Sévérité**: Warning
+
+### 6. Burst d'erreurs sur un Objet
+- **Condition**: >3 erreurs sur 10 minutes
+- **Seuil**: 3 erreurs
+- **Sévérité**: Warning
+
+## 🔧 Configuration
+
+### Variables d'Environnement
+
+#### Producer
+```env
+KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+KAFKA_TOPIC=ingestion-logs
+LOGS_FILE_PATH=/app/data/logs.json
+LOG_LEVEL=INFO
+SIMULATE_REALTIME=false
+```
+
+#### Consumer
+```env
+KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+KAFKA_TOPIC=ingestion-logs
+KAFKA_GROUP_ID=ingestion-consumer-group
+LOKI_URL=http://loki:3100
+METRICS_PORT=8000
+LOG_LEVEL=INFO
+```
+
+### Structure JSON Améliorée
+
+Le producer transforme les logs originaux en structure optimisée pour l'observabilité :
+
 ```json
 {
-  "No_Sequence": "2025-09-05-16-45",
-  "Date_Sequence": "2025-09-05",
-  "Heure_Sequence": "16",
-  "Minute_Sequence": "45",
-  "Entreprise": "akonovia",
-  "Zone": "1-Raw",
-  "Source": "zohoprojects",
-  "Objet_Id": 1995,
-  "Objet": "projects", 
-  "Transformation": "Zoho_API_get_data",
-  "Etat": "SUCCESS",
-  "Debut": "05-09-2025 16:45:26.191702",
-  "Fin": "05-09-2025 16:45:27.089917",
-  "Duree secondes": 0.898215,
-  "Description": "Tout roule, pas de stress!",
-  "cpu_time (sec)": "0.09",
-  "memory_used (bytes)": 5517312
+  "@timestamp": "2025-09-15T10:30:00.000Z",
+  "@version": "1",
+  "event": {
+    "dataset": "ingestion-logs",
+    "kind": "event",
+    "outcome": "success"
+  },
+  "source": {
+    "name": "PowerBI",
+    "type": "api"
+  },
+  "objet": {
+    "id": 1224,
+    "name": "workspaces",
+    "transformation": "PowerBI_API_get_data"
+  },
+  "etat": "SUCCESS",
+  "performance": {
+    "duree_secondes": 1.154133,
+    "cpu_time_sec": 0.11,
+    "memory_used_bytes": 5849088,
+    "memory_used_mb": 5.58
+  },
+  "labels": {
+    "etat": "SUCCESS",
+    "source": "PowerBI",
+    "zone": "1-Raw",
+    "entreprise": "akonovia"
+  },
+  "metrics": {
+    "is_failed": 0,
+    "is_success": 1,
+    "high_memory_usage": 0,
+    "high_cpu_usage": 0
+  }
 }
 ```
 
-## Monitoring
+## 🔍 Monitoring et Debugging
 
-### Grafana Dashboards
-- **Request Rate by Service**: HTTP request metrics
-- **Log Entries by Source**: Distribution of log sources
-- **Message Processing Duration**: Kafka processing latencies
-- **Processing Errors**: Error rates by service
-- **Success Rate**: Overall system success rate
-- **Active Kafka Connections**: Connection health
-
-### Prometheus Metrics
-Each service exposes:
-- `requests_total` - HTTP requests by endpoint and status
-- `request_duration_seconds` - Request processing time
-- `messages_processed_total` - Kafka messages by topic and status
-- `message_processing_duration_seconds` - Message processing time
-- `log_entries_by_source_total` - Log entries by source system
-- `processing_errors_total` - Processing errors by type
-- `active_connections` - Active connection counts
-
-## Kafka Topics
-
-- `raw-logs` (3 partitions): Raw log entries from ingestion service
-- `standardized-logs` (3 partitions): Normalized log entries
-- `processed-metrics` (3 partitions): Analytics and metrics
-- `alerts` (1 partition): Anomaly alerts
-
-## 🔧 **How the Setup Works**
-
-### **Container Orchestration**
-The `docker-compose.yml` file defines 7 services that work together:
-
-1. **Zookeeper** - Kafka's coordination service
-   - Manages Kafka cluster metadata
-   - Handles leader election for Kafka partitions
-   - Stores consumer group offsets
-
-2. **Kafka** - Message streaming platform
-   - Automatically creates topics when services start
-   - Configured with 3 partitions per topic for parallel processing
-   - Data retention set to 7 days with 1GB size limit per topic
-
-3. **Three Python Microservices**
-   - Each runs in its own container with health checks
-   - Connected via shared Docker network
-   - Auto-restart on failure
-
-4. **Prometheus** - Metrics collection
-   - Scrapes metrics from all services every 15 seconds
-   - Stores time-series data for 15 days
-   - Provides query interface for Grafana
-
-5. **Grafana** - Visualization platform
-   - Auto-provisions Prometheus as data source
-   - Loads pre-built dashboard on startup
-   - Admin credentials: admin/admin123
-
-6. **Kafka UI** - Management interface
-   - Provides web interface for Kafka operations
-   - Shows topics, partitions, consumer groups
-   - Useful for debugging message flow
-
-### **Startup Sequence**
-1. Zookeeper starts first (required by Kafka)
-2. Kafka starts and waits for Zookeeper
-3. Python services wait for Kafka health check
-4. Prometheus starts after all services are ready
-5. Grafana starts last and connects to Prometheus
-
-### **Data Processing Flow**
-```
-Raw Log Entry → Validation → Kafka Topic → Consumer → Processing → Analytics → Metrics → Dashboard
-```
-
-### **Automatic Features**
-- **Topic Creation**: Kafka automatically creates topics when services publish
-- **Consumer Groups**: Each service has its own consumer group for load balancing
-- **Health Monitoring**: All containers have built-in health checks
-- **Data Persistence**: Volumes ensure data survives container restarts
-- **Network Isolation**: Services communicate via dedicated Docker network
-
-### **Monitoring & Alerting**
-- **Service Metrics**: Request rates, response times, error counts
-- **Business Metrics**: Log processing rates, success/failure ratios
-- **Infrastructure Metrics**: Memory usage, CPU utilization, disk space
-- **Custom Metrics**: Efficiency scores, anomaly detection rates
-
-## 📊 **Understanding the Analytics**
-
-### **Calculated Metrics**
-- **Efficiency Score** (0-100): Based on execution time vs. resource usage
-- **Throughput**: Objects processed per minute
-- **Resource Utilization**: CPU time vs. total execution time ratio
-- **Success Rate**: Percentage of successful vs. failed operations
-
-### **Anomaly Detection Rules**
-- **Execution Failures**: Status = "FAILED"
-- **Long Execution**: Duration > 1 hour
-- **High Memory Usage**: Memory > 100MB
-- **Data Quality Issues**: Negative memory values
-- **Low Efficiency**: Efficiency score < 20%
-
-### **Dashboard Panels**
-- **Request Rate**: Real-time API call volume
-- **Source Distribution**: Pie chart of log sources (Zoho, PowerBI, etc.)
-- **Processing Duration**: Response time percentiles
-- **Error Tracking**: Failed operations by service
-- **Success Gauge**: Overall system health indicator
-
-## 🧪 **Testing the System**
-
-### **Manual Testing Commands**
+### Vérifier les Logs
 ```bash
-# Test single log ingestion
-make test-ingestion
+# Producer
+docker-compose logs -f producer
 
-# View analytics
-curl http://localhost:8003/analytics/summary | jq
+# Consumer
+docker-compose logs -f consumer
 
-# Check for anomalies
-curl http://localhost:8003/analytics/anomalies | jq
-
-# View recent processed logs
-curl "http://localhost:8003/analytics/recent?limit=10" | jq
-```
-
-### **Monitoring System Health**
-```bash
-# Check all service health
-make health
-
-# View container status
-docker-compose ps
-
-# Monitor logs in real-time
-make logs
-
-# Check Kafka topics
-make kafka-topics
-```
-
-## Production Considerations
-
-### Scaling
-- Each microservice can be horizontally scaled
-- Kafka partitions allow parallel processing
-- Consumer groups enable load balancing
-
-### Persistence
-- Kafka data persisted with 7-day retention
-- Prometheus data retained for 15 days  
-- Grafana dashboards and configuration persisted
-
-### Security
-- Services run as non-root users
-- No secrets in environment variables (use secrets management in production)
-- Network isolation with Docker networks
-
-### Monitoring
-- Comprehensive health checks on all services
-- Prometheus metrics for observability
-- Grafana alerting (configure SMTP for notifications)
-- Log aggregation via structured JSON logging
-
-## Development
-
-### Local Development
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Run individual services
-cd services/log-ingestion && python main.py
-cd services/log-standardization && python main.py
-cd services/log-processor && python main.py
-```
-
-### Testing
-```bash
-# Install test dependencies
-pip install pytest pytest-asyncio httpx
-
-# Run tests (when implemented)
-pytest tests/
-```
-
-## Troubleshooting
-
-### Common Issues
-1. **Services not starting**: Check Docker logs with `docker-compose logs <service>`
-2. **Kafka connection errors**: Ensure Kafka is healthy before services start
-3. **No data in Grafana**: Check Prometheus targets are UP
-4. **High memory usage**: Adjust container limits in docker-compose.yml
-
-### Useful Commands
-```bash
-# View logs for all services
+# Tous les services
 docker-compose logs -f
-
-# Restart a specific service
-docker-compose restart log-ingestion
-
-# Scale a service
-docker-compose up -d --scale log-processor=3
-
-# Stop all services
-docker-compose down
-
-# Stop and remove volumes (data loss!)
-docker-compose down -v
 ```
 
-## 🎯 **Use Cases & Benefits**
+### Vérifier les Métriques
+```bash
+# Métriques Prometheus du consumer
+curl http://localhost:8000/metrics
 
-### **Business Use Cases**
-- **API Performance Monitoring**: Track execution times across different data sources
-- **Resource Optimization**: Identify inefficient operations consuming excessive CPU/memory
-- **SLA Compliance**: Monitor success rates and response times for service agreements
-- **Capacity Planning**: Analyze throughput patterns to predict scaling needs
-- **Incident Response**: Automatic anomaly detection and alerting for failures
+# Statut Prometheus
+curl http://localhost:9090/-/healthy
 
-### **Technical Benefits**
-- **Real-time Insights**: Sub-second processing from log ingestion to dashboard
-- **Scalability**: Horizontal scaling support via Kafka partitioning
-- **Reliability**: Built-in health checks and automatic service recovery
-- **Observability**: Comprehensive metrics and structured logging
-- **Maintainability**: Clean microservices architecture with clear boundaries
+# Statut Loki
+curl http://localhost:3100/ready
+```
 
-### **Operational Advantages**
-- **Zero Downtime Deployments**: Rolling updates supported via container orchestration
-- **Data Persistence**: No data loss during system restarts
-- **Easy Debugging**: Kafka UI and structured logs for troubleshooting
-- **Cost Optimization**: Identify resource-hungry operations for optimization
-- **Compliance**: Audit trail of all operations and system changes
+### Kafka Management
+```bash
+# Lister les topics
+docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list
 
-## 🚀 **Getting Started Checklist**
+# Décrire le topic ingestion-logs
+docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --describe --topic ingestion-logs
 
-- [ ] Install Docker and Docker Compose
-- [ ] Clone the repository
-- [ ] Run `docker-compose up -d`
-- [ ] Wait for services to start (60 seconds)
-- [ ] Trigger log ingestion: `make ingest`
-- [ ] Open Grafana: http://localhost:3000
-- [ ] Explore analytics: `make analytics`
-- [ ] Check for anomalies: `make anomalies`
-- [ ] Review Kafka topics: http://localhost:8080
+# Consumer group status
+docker-compose exec kafka kafka-consumer-groups --bootstrap-server localhost:9092 --describe --group ingestion-consumer-group
+```
 
-## 📚 **Additional Resources**
+## 🧪 Tests et Validation
 
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Apache Kafka Documentation](https://kafka.apache.org/documentation/)
-- [Prometheus Monitoring](https://prometheus.io/docs/)
-- [Grafana Dashboard Guide](https://grafana.com/docs/)
-- [Docker Compose Reference](https://docs.docker.com/compose/)
+### Test du Producer
+```bash
+# Exécuter le producer une fois
+docker-compose run --rm producer python producer.py
 
-## 🤝 **Contributing**
+# Mode simulation temps réel
+docker-compose run --rm -e SIMULATE_REALTIME=true producer python producer.py
+```
 
-This project demonstrates best practices for:
-- Microservices architecture
-- Event-driven processing
-- Observability and monitoring
-- Container orchestration
-- API design and documentation
+### Validation des Métriques
+```bash
+# Vérifier que les métriques sont collectées
+curl -s http://localhost:9090/api/v1/query?query=ingestion_runs_total | jq
 
-Feel free to extend the system with additional features like:
-- Alert notifications (Slack, email)
-- Data export capabilities
-- Advanced analytics models
-- Machine learning-based anomaly detection
+# Vérifier les logs dans Loki
+curl -s "http://localhost:3100/loki/api/v1/query_range?query={job=\"ingestion-logs\"}&start=$(date -d '1 hour ago' --iso-8601)&end=$(date --iso-8601)" | jq
+```
 
-## License
+### Test des Alertes
 
-This project is provided as-is for educational and development purposes.
+1. **Simuler des échecs**: Modifier les logs pour inclure des états FAILED
+2. **Vérifier dans Grafana**: Aller dans Alerting > Alert Rules
+3. **Tester une source muette**: Arrêter le producer et attendre 75 minutes
+
+## 📁 Structure du Projet
+
+```
+observability-stack/
+├── docker-compose.yml              # Configuration Docker Compose
+├── logs.json                       # Données d'exemple d'ingestion
+├── README.md                       # Documentation
+├── src/
+│   ├── producer/
+│   │   ├── producer.py             # Script producer Kafka
+│   │   ├── requirements.txt        # Dépendances Python
+│   │   └── Dockerfile              # Image Docker producer
+│   └── consumer/
+│       ├── consumer.py             # Script consumer avec métriques
+│       ├── requirements.txt        # Dépendances Python
+│       └── Dockerfile              # Image Docker consumer
+└── config/
+    ├── prometheus/
+    │   ├── prometheus.yml          # Configuration Prometheus
+    │   └── alerts/
+    │       └── ingestion-alerts.yml # Règles d'alertes
+    ├── loki/
+    │   └── loki-config.yml         # Configuration Loki
+    ├── promtail/
+    │   └── promtail-config.yml     # Configuration Promtail
+    └── grafana/
+        ├── provisioning/
+        │   ├── datasources/
+        │   │   └── datasources.yml # Configuration datasources
+        │   └── dashboards/
+        │       └── dashboards.yml  # Configuration dashboards
+        └── dashboards/
+            └── dashboard-grafana-ingestion.json # Dashboard principal
+```
+
+## 🔄 Production Readiness
+
+### Sécurité
+- [ ] Configurer l'authentification Grafana (LDAP/OAuth)
+- [ ] Sécuriser Kafka avec SSL/SASL
+- [ ] Utiliser des secrets Docker pour les mots de passe
+- [ ] Configurer les certificats TLS
+
+### Scalabilité
+- [ ] Augmenter les partitions Kafka pour parallélisme
+- [ ] Déployer plusieurs instances consumer
+- [ ] Configurer la réplication Kafka
+- [ ] Utiliser un stockage persistant (S3, GCS)
+
+### Backup et Recovery
+- [ ] Sauvegarder les configurations Grafana
+- [ ] Configurer la rétention des données Prometheus/Loki
+- [ ] Planifier les sauvegardes des topics Kafka
+- [ ] Documenter les procédures de recovery
+
+## 🛠️ Dépannage
+
+### Problèmes Courants
+
+#### Services qui ne démarrent pas
+```bash
+# Vérifier les logs
+docker-compose logs <service_name>
+
+# Redémarrer un service
+docker-compose restart <service_name>
+
+# Reconstruire les images
+docker-compose build --no-cache
+```
+
+#### Kafka Connection Issues
+```bash
+# Vérifier la connectivité Kafka
+docker-compose exec producer python -c "from kafka import KafkaProducer; print('OK')"
+
+# Vérifier les topics
+docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list
+```
+
+#### Métriques manquantes
+```bash
+# Vérifier l'endpoint du consumer
+curl http://localhost:8000/metrics
+
+# Vérifier la configuration Prometheus
+curl http://localhost:9090/api/v1/targets
+```
+
+#### Dashboard vide
+1. Vérifier que les datasources sont connectées
+2. Vérifier que les métriques remontent dans Prometheus
+3. Vérifier les labels dans les requêtes PromQL
+
+## 📞 Support
+
+Pour toute question ou problème :
+1. Consulter les logs avec `docker-compose logs`
+2. Vérifier la documentation des composants
+3. Ouvrir une issue avec les logs et la configuration
+
+## 📄 Licence
+
+Ce projet est sous licence MIT. Voir le fichier LICENSE pour plus de détails.

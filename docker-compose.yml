@@ -67,61 +67,77 @@ services:
       retries: 3
       start_period: 60s
 
-  # Log Ingestion Microservice
-  log-ingestion:
+  # Producer Python → Kafka (as specified in requirements)
+  # Note: Producer runs as a job/task, not a persistent service
+  producer:
     build:
       context: .
-      dockerfile: services/log-ingestion/Dockerfile
-    container_name: log-ingestion
+      dockerfile: src/producer/Dockerfile
+    container_name: ingestion-producer
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=ingestion-logs
       - LOG_LEVEL=INFO
-      - PORT=8001
-    ports:
-      - "8001:8001"
     depends_on:
       kafka:
         condition: service_healthy
+    networks:
+      - observability-network
+    restart: "no"  # Don't auto-restart - it's a job
+    volumes:
+      - ./logs.json:/app/data/logs.json:ro
+      - ./logs:/app/logs
+    profiles:
+      - tools  # Use profile so it doesn't start automatically
+
+  # Consumer/Processing service (as specified in requirements)
+  consumer:
+    build:
+      context: .
+      dockerfile: src/consumer/Dockerfile
+    container_name: ingestion-consumer
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=ingestion-logs
+      - LOKI_URL=http://loki:3100
+      - LOG_LEVEL=INFO
+    depends_on:
+      kafka:
+        condition: service_healthy
+      loki:
+        condition: service_started
     networks:
       - observability-network
     restart: unless-stopped
     volumes:
-      - ./logs.json:/app/logs.json:ro
+      - ./logs:/app/logs
 
-  # Log Standardization Microservice
-  log-standardization:
-    build:
-      context: .
-      dockerfile: services/log-standardization/Dockerfile
-    container_name: log-standardization
-    environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - LOG_LEVEL=INFO
-      - PORT=8002
+  # Loki for log aggregation (required for Grafana logs)
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: loki
     ports:
-      - "8002:8002"
-    depends_on:
-      kafka:
-        condition: service_healthy
+      - "3100:3100"
+    volumes:
+      - ./config/loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
     networks:
       - observability-network
     restart: unless-stopped
 
-  # Log Processing Microservice
-  log-processor:
-    build:
-      context: .
-      dockerfile: services/log-processor/Dockerfile
-    container_name: log-processor
-    environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - LOG_LEVEL=INFO
-      - PORT=8003
-    ports:
-      - "8003:8003"
+  # Promtail for log shipping to Loki
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: promtail
+    volumes:
+      - ./config/promtail/promtail-config.yml:/etc/promtail/config.yml
+      - ./logs:/var/log/ingestion:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/config.yml
     depends_on:
-      kafka:
-        condition: service_healthy
+      - loki
     networks:
       - observability-network
     restart: unless-stopped
@@ -142,15 +158,14 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/alerts:/etc/prometheus/alerts:ro
       - prometheus-data:/prometheus
     networks:
       - observability-network
     restart: unless-stopped
     depends_on:
-      - log-ingestion
-      - log-standardization
-      - log-processor
+      - consumer
 
   # Grafana Dashboards
   grafana:
@@ -165,12 +180,14 @@ services:
       - "3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks:
       - observability-network
     restart: unless-stopped
     depends_on:
       - prometheus
+      - loki
 
   # Kafka UI for management
   kafka-ui:
@@ -204,4 +221,6 @@ volumes:
   prometheus-data:
     driver: local
   grafana-data:
+    driver: local
+  loki-data:
     driver: local

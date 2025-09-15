@@ -49,58 +49,48 @@ status: ## Check status of all containers
 health: ## Check health of all services
 	@echo "$(GREEN)Checking service health...$(NC)"
 	@echo ""
-	@echo "$(YELLOW)Log Ingestion Service:$(NC)"
-	@curl -s http://localhost:8001/health | jq . || echo "$(RED)Service not responding$(NC)"
+	@echo "$(YELLOW)Kafka:$(NC)"
+	@docker-compose ps kafka | grep -q "Up" && echo "✅ Running" || echo "❌ Not running"
 	@echo ""
-	@echo "$(YELLOW)Log Standardization Service:$(NC)" 
-	@curl -s http://localhost:8002/health | jq . || echo "$(RED)Service not responding$(NC)"
+	@echo "$(YELLOW)Producer:$(NC)"
+	@docker-compose ps producer | grep -q "Up" && echo "✅ Running" || echo "❌ Not running"
 	@echo ""
-	@echo "$(YELLOW)Log Processing Service:$(NC)"
-	@curl -s http://localhost:8003/health | jq . || echo "$(RED)Service not responding$(NC)"
+	@echo "$(YELLOW)Consumer:$(NC)"
+	@docker-compose ps consumer | grep -q "Up" && echo "✅ Running" || echo "❌ Not running"
+	@echo ""
+	@echo "$(YELLOW)Consumer Metrics:$(NC)"
+	@curl -s http://localhost:8000/metrics > /dev/null && echo "✅ Available" || echo "❌ Not available"
+	@echo ""
+	@echo "$(YELLOW)Prometheus:$(NC)"
+	@curl -s http://localhost:9090/-/healthy > /dev/null && echo "✅ Healthy" || echo "❌ Not healthy"
+	@echo ""
+	@echo "$(YELLOW)Loki:$(NC)"
+	@curl -s http://localhost:3100/ready > /dev/null && echo "✅ Ready" || echo "❌ Not ready"
+	@echo ""
+	@echo "$(YELLOW)Grafana:$(NC)"
+	@curl -s http://localhost:3000/api/health > /dev/null && echo "✅ Healthy" || echo "❌ Not healthy"
 	@echo ""
 
-ingest: ## Trigger log ingestion
-	@echo "$(GREEN)Triggering log ingestion...$(NC)"
-	curl -X GET "http://localhost:8001/ingest/trigger"
+ingest: ## Run producer to ingest logs
+	@echo "$(GREEN)Running producer to ingest logs...$(NC)"
+	docker-compose --profile tools run --rm producer python producer.py
 	@echo ""
 
-analytics: ## Get analytics summary
-	@echo "$(GREEN)Analytics Summary:$(NC)"
-	curl -s http://localhost:8003/analytics/summary | jq .
+metrics: ## Show consumer metrics
+	@echo "$(GREEN)Consumer Metrics:$(NC)"
+	@curl -s http://localhost:8000/metrics | grep ingestion_ | head -20
 
-anomalies: ## Check for anomalies
-	@echo "$(GREEN)Recent Anomalies:$(NC)"
-	curl -s http://localhost:8003/analytics/anomalies | jq .
+verify: ## Verify complete stack functionality
+	@echo "$(GREEN)Running complete stack verification...$(NC)"
+	@./verify-stack.sh
 
 kafka-topics: ## List Kafka topics
 	@echo "$(GREEN)Kafka Topics:$(NC)"
 	docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list
 
-test-ingestion: ## Test ingestion with sample data
-	@echo "$(GREEN)Testing single log ingestion...$(NC)"
-	curl -X POST "http://localhost:8001/ingest/single" \
-		-H "Content-Type: application/json" \
-		-d '{
-			"No_Sequence": "test-$(shell date +%s)",
-			"Date_Sequence": "$(shell date +%Y-%m-%d)",
-			"Heure_Sequence": "$(shell date +%H)",
-			"Minute_Sequence": "$(shell date +%M)",
-			"Entreprise": "test-company",
-			"Zone": "1-Raw",
-			"Source": "test-source",
-			"Objet_Id": 9999,
-			"Objet": "test-object",
-			"Transformation": "test_transformation",
-			"Parametres": "test parameters",
-			"Etat": "SUCCESS",
-			"Debut": "$(shell date "+%d-%m-%Y %H:%M:%S.000000")",
-			"Fin": "$(shell date "+%d-%m-%Y %H:%M:%S.999999")",
-			"Duree secondes": 1.0,
-			"Description": "Test log entry",
-			"cpu_time (sec)": "0.1",
-			"memory_used (bytes)": 1000000
-		}'
-	@echo ""
+test-stack: ## Test stack functionality
+	@echo "$(GREEN)Running automated stack tests...$(NC)"
+	python3 test-stack.py
 
 open-grafana: ## Open Grafana in browser
 	@echo "$(GREEN)Opening Grafana dashboard...$(NC)"
@@ -118,12 +108,11 @@ open-kafka-ui: ## Open Kafka UI in browser
 
 urls: ## Show all service URLs
 	@echo "$(GREEN)Service URLs:$(NC)"
-	@echo "Log Ingestion:     http://localhost:8001"
-	@echo "Log Standardization: http://localhost:8002"  
-	@echo "Log Processing:    http://localhost:8003"
-	@echo "Grafana:          http://localhost:3000 (admin/admin123)"
+	@echo "Grafana Dashboard: http://localhost:3000 (admin/admin123)"
 	@echo "Prometheus:       http://localhost:9090"
+	@echo "Loki:             http://localhost:3100"
 	@echo "Kafka UI:         http://localhost:8080"
+	@echo "Consumer Metrics: http://localhost:8000/metrics"
 
 scale: ## Scale services (usage: make scale SERVICE=log-processor REPLICAS=3)
 	docker-compose up -d --scale $(SERVICE)=$(REPLICAS)
