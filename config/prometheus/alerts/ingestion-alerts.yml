@@ -12,7 +12,7 @@ groups:
           type: failure
         annotations:
           summary: "Échec détecté dans l'ingestion"
-          description: "{{ $value }} échecs d'ingestion détectés dans les 5 dernières minutes"
+          description: "{{ printf \"%.0f\" $value }} échecs d'ingestion détectés dans les 5 dernières minutes"
           runbook_url: "https://wiki.company.com/runbook/ingestion-failure"
 
       # 2. Taux d'échec élevé : >2% pendant 15 minutes
@@ -25,7 +25,7 @@ groups:
           type: high_failure_rate
         annotations:
           summary: "Taux d'échec élevé dans l'ingestion"
-          description: "Le taux d'échec d'ingestion est de {{ $value | humanizePercentage }} sur 15 minutes (seuil: 2%)"
+          description: "Le taux d'échec d'ingestion est de {{ printf \"%.1f\" $value }}% sur 15 minutes (seuil: 2%)"
           runbook_url: "https://wiki.company.com/runbook/ingestion-high-failure-rate"
 
       # 3. Source muette : pas d'occurrence sur 75 minutes
@@ -38,7 +38,7 @@ groups:
           type: source_silent
         annotations:
           summary: "Source d'ingestion muette: {{ $labels.source }}"
-          description: "La source {{ $labels.source }} n'a pas eu d'exécution depuis {{ $value | humanizeDuration }}"
+          description: "La source {{ $labels.source }} n'a pas eu d'exécution depuis {{ printf \"%.0f\" $value }} minutes"
           runbook_url: "https://wiki.company.com/runbook/ingestion-source-silent"
 
       # 4. Latence p95 dégradée : p95 > 2× baseline (baseline = 30s)
@@ -51,7 +51,7 @@ groups:
           type: high_latency
         annotations:
           summary: "Latence p95 dégradée pour {{ $labels.source }}"
-          description: "La latence p95 de {{ $labels.source }} est de {{ $value | humanizeDuration }} (seuil: 60s)"
+          description: "La latence p95 de {{ $labels.source }} est de {{ printf \"%.1f\" $value }}s (seuil: 60s)"
           runbook_url: "https://wiki.company.com/runbook/ingestion-high-latency"
 
       # 5. Surconsommation mémoire : mémoire >150 MB (p95)
@@ -64,7 +64,7 @@ groups:
           type: high_memory_usage
         annotations:
           summary: "Surconsommation mémoire pour {{ $labels.source }}"
-          description: "L'utilisation mémoire p95 de {{ $labels.source }} est de {{ $value | humanizeBytes }} (seuil: 150MB)"
+          description: "L'utilisation mémoire p95 de {{ $labels.source }} est de {{ printf \"%.0f\" $value }}MB (seuil: 150MB)"
           runbook_url: "https://wiki.company.com/runbook/ingestion-high-memory"
 
       # 5 bis. Surconsommation CPU : CPU >60s (p95)
@@ -77,7 +77,7 @@ groups:
           type: high_cpu_usage
         annotations:
           summary: "Surconsommation CPU pour {{ $labels.source }}"
-          description: "L'utilisation CPU p95 de {{ $labels.source }} est de {{ $value | humanizeDuration }} (seuil: 60s)"
+          description: "L'utilisation CPU p95 de {{ $labels.source }} est de {{ printf \"%.1f\" $value }}s (seuil: 60s)"
           runbook_url: "https://wiki.company.com/runbook/ingestion-high-cpu"
 
       # 6. Burst d'erreurs sur un Objet : >3 erreurs sur 10 minutes
@@ -90,7 +90,7 @@ groups:
           type: error_burst
         annotations:
           summary: "Burst d'erreurs sur {{ $labels.source }}/{{ $labels.objet }}"
-          description: "{{ $value }} erreurs détectées sur {{ $labels.source }}/{{ $labels.objet }} dans les 10 dernières minutes (seuil: 3)"
+          description: "{{ printf \"%.0f\" $value }} erreurs détectées sur {{ $labels.source }}/{{ $labels.objet }} dans les 10 dernières minutes (seuil: 3)"
           runbook_url: "https://wiki.company.com/runbook/ingestion-error-burst"
 
       # Alertes supplémentaires pour la santé du système
@@ -115,5 +115,5 @@ groups:
           type: kafka_lag
         annotations:
           summary: "Lag Kafka élevé sur ingestion-logs"
-          description: "Le lag Kafka sur le topic ingestion-logs est de {{ $value }} messages"
+          description: "Le lag Kafka sur le topic ingestion-logs est de {{ printf \"%.0f\" $value }} messages"
           runbook_url: "https://wiki.company.com/runbook/ingestion-kafka-lag"

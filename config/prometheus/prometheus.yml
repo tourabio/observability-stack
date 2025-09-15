@@ -42,8 +42,4 @@ alerting:
     - static_configs:
         - targets: []
 
-# Configuration de stockage
-storage:
-  tsdb:
-    retention.time: 15d
-    retention.size: 10GB
+# Note: Storage retention is configured via command line arguments in docker-compose.yml
