@@ -87,7 +87,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(ingestion_runs_total{etat=\"SUCCESS\"}[5m])) * 300",
+          "expr": "sum(ingestion_runs_total{etat=\"SUCCESS\"})",
           "refId": "A"
         }
       ],
@@ -146,7 +146,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(ingestion_runs_total{etat=\"FAILED\"}[5m])) * 300",
+          "expr": "sum(ingestion_runs_total{etat=\"FAILED\"})",
           "refId": "A"
         }
       ],
@@ -214,7 +214,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "100 * sum(rate(ingestion_runs_total{etat=\"FAILED\"}[5m])) / sum(rate(ingestion_runs_total[5m]))",
+          "expr": "100 * sum(ingestion_runs_total{etat=\"FAILED\"}) / sum(ingestion_runs_total)",
           "refId": "A"
         }
       ],
@@ -280,7 +280,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(ingestion_duration_seconds_bucket[5m])) by (le))",
+          "expr": "sum(ingestion_duration_seconds_sum) / sum(ingestion_duration_seconds_count)",
           "refId": "A"
         }
       ],
@@ -346,7 +346,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(ingestion_memory_usage_bytes_bucket[5m])) by (le)) / 1024 / 1024",
+          "expr": "(sum(ingestion_memory_usage_bytes_sum) / sum(ingestion_memory_usage_bytes_count)) / 1024 / 1024",
           "refId": "A"
         }
       ],
